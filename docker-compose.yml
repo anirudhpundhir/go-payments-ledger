@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ledger
+    ports: ["5432:5432"]
+    volumes:
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  ledgerd:
+    build: .
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ledger?sslmode=disable
+      ADDR: ":8080"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
