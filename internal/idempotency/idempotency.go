@@ -10,7 +10,7 @@
 //     - in_progress with a live lease      -> ErrInProgress (HTTP 409)
 //     - in_progress with an expired lease  -> re-claim (crashed owner)
 //  2. Execute: run the operation AND mark the key completed with its response
-//     in one SERIALIZABLE transaction, guarded by the lock token. Therefore a
+//     in one transaction, guarded by the lock token. Therefore a
 //     completed key always implies committed side effects, and a crash at any
 //     point leaves either nothing or everything.
 //  3. On infrastructure errors (not business 4xx) the claim is released so
@@ -33,11 +33,11 @@ import (
 )
 
 var (
-	// ErrMismatch: key reused with a different request.
+	// ErrMismatch means key reused with a different request.
 	ErrMismatch = errors.New("idempotency key reused with a different request")
-	// ErrInProgress: another request with this key is currently executing.
+	// ErrInProgress means another request with this key is currently executing.
 	ErrInProgress = errors.New("a request with this idempotency key is in progress")
-	// ErrLostLease: our lease expired and another worker re-claimed the key.
+	// ErrLostLease means our lease expired and another worker re-claimed the key.
 	ErrLostLease = errors.New("idempotency lease lost")
 )
 

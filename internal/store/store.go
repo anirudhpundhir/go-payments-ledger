@@ -1,9 +1,11 @@
 // Package store implements Postgres persistence for the ledger.
 //
-// Every write runs in a SERIALIZABLE transaction and additionally takes
-// row locks (SELECT ... FOR UPDATE, in a deterministic id order) on the
-// accounts it touches. Serialization failures and deadlocks are retried
-// with jittered exponential backoff.
+// Correctness of balance updates comes from pessimistic row locks: every
+// write takes SELECT ... FOR UPDATE on the accounts it touches, in a
+// deterministic id order, before reading balances. This makes READ COMMITTED
+// sufficient (and the default, see ADR-002); SERIALIZABLE is supported as an
+// option. Serialization failures and deadlocks are retried with jittered
+// exponential backoff.
 package store
 
 import (
@@ -23,12 +25,14 @@ import (
 	"github.com/anirudhpundhir/go-payments-ledger/migrations"
 )
 
-// MaxAttempts bounds optimistic retries of a serializable transaction.
+// MaxAttempts bounds optimistic retries of a transaction.
 const MaxAttempts = 10
 
 // Store wraps a pgx connection pool.
 type Store struct {
 	Pool *pgxpool.Pool
+	// Isolation used for write transactions. Defaults to READ COMMITTED.
+	Isolation pgx.TxIsoLevel
 }
 
 // Open connects to Postgres and verifies connectivity.
@@ -45,7 +49,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{Pool: pool}, nil
+	return &Store{Pool: pool, Isolation: pgx.ReadCommitted}, nil
 }
 
 // Close releases the pool.
@@ -109,17 +113,17 @@ func IsRetryable(err error) bool {
 	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")
 }
 
-// WithTx runs fn in a SERIALIZABLE transaction, retrying on serialization
-// failures. fn must be safe to re-run (no side effects outside tx).
+// WithTx runs fn in a transaction at s.Isolation, retrying on serialization
+// failures and deadlocks. fn must be safe to re-run (no side effects outside tx).
 func (s *Store) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	var err error
 	for attempt := 0; attempt < MaxAttempts; attempt++ {
-		err = pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, fn)
+		err = pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{IsoLevel: s.Isolation}, fn)
 		if !IsRetryable(err) {
 			return err
 		}
 		backoff := time.Duration(1<<attempt) * time.Millisecond
-		backoff += time.Duration(rand.Int64N(int64(backoff) + 1))
+		backoff += time.Duration(rand.Int64N(int64(backoff) + 1)) //nolint:gosec // jitter, not security-sensitive
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -147,7 +151,7 @@ func GetAccount(ctx context.Context, q pgx.Tx, id string) (ledger.Account, error
 		FROM accounts WHERE id = $1`, id))
 }
 
-// GetAccountPool loads an account outside a transaction (read path).
+// GetAccount loads an account outside a transaction (read path).
 func (s *Store) GetAccount(ctx context.Context, id string) (ledger.Account, error) {
 	return scanAccount(s.Pool.QueryRow(ctx, `SELECT id::text, name, currency, balance, allow_negative, created_at
 		FROM accounts WHERE id = $1`, id))

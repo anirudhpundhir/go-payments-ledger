@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/anirudhpundhir/go-payments-ledger/internal/api"
 	"github.com/anirudhpundhir/go-payments-ledger/internal/idempotency"
 	"github.com/anirudhpundhir/go-payments-ledger/internal/store"
@@ -36,6 +38,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer st.Close()
+	if getenv("LEDGER_ISOLATION", "read_committed") == "serializable" {
+		st.Isolation = pgx.Serializable
+	}
 	if err := st.Migrate(ctx); err != nil {
 		return err
 	}

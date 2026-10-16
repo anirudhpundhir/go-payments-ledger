@@ -7,11 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/anirudhpundhir/go-payments-ledger/internal/api"
 	"github.com/anirudhpundhir/go-payments-ledger/internal/idempotency"
@@ -35,13 +38,16 @@ func setup(t testing.TB) *env {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	if os.Getenv("LEDGER_TEST_ISOLATION") == "serializable" {
+		st.Isolation = pgx.Serializable
+	}
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := st.Pool.Exec(ctx, `TRUNCATE postings, journal_entries, accounts, idempotency_keys`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	srv := httptest.NewServer((&api.Server{Store: st, Idem: idempotency.New(st, 30*time.Second)}).Handler())
+	srv := httptest.NewServer((&api.Server{Store: st, Idem: idempotency.New(st, 30*time.Second), Log: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))}).Handler())
 	t.Cleanup(func() { srv.Close(); st.Close() })
 	return &env{t: t, store: st, srv: srv}
 }

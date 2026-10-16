@@ -313,4 +313,6 @@ func writeRaw(w http.ResponseWriter, r idempotency.Response) {
 
 func writeJSON(w http.ResponseWriter, code int, v any) { writeRaw(w, jsonResp(code, v)) }
 
-func writeError(w http.ResponseWriter, code int, typ, msg string) { writeRaw(w, *errResp(code, typ, msg)) }
+func writeError(w http.ResponseWriter, code int, typ, msg string) {
+	writeRaw(w, *errResp(code, typ, msg))
+}
